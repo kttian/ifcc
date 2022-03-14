@@ -19,7 +19,7 @@ from clinicgen.external.bleu.bleu import Bleu
 from clinicgen.external.cider.cider import Cider, CiderScorer
 from clinicgen.external.rouge.rouge import Rouge
 from clinicgen.external.spice.spice import Spice
-
+from clinicgen.radgraph_inference import postprocess_reports
 
 class EntityMatcher:
     DOC_SEPARATOR = 'DOCSEP'
@@ -40,6 +40,7 @@ class EntityMatcher:
         self.batch = batch
         self.nli = nli
         self.ner = self.load_ner()
+        self.radgraph_gt = self.load_radgraph()
         m = mode.split(self.MODE_SEPARATOR)
         self.mode = m[0]
         if self.mode == self.MODE_NLI_ENTAILMENT_HALF:
@@ -85,6 +86,13 @@ class EntityMatcher:
         config = {'tokenize_batch_size': cls.NER_BATCH_SIZE, 'ner_batch_size': cls.NER_BATCH_SIZE}
         return Pipeline(lang='en', package='radiology', processors={'tokenize': 'default', 'ner': 'radiology'},
                         **config)
+    
+    @classmethod
+    def load_radgraph(cls, path='/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/radgraph_inference_out_report_key.json.gz'):
+        # load radgraph inference outputs (ground truth entities/relations)
+        with gzip.open(path, 'r') as f:
+            radgraph = json.load(f)
+        return radgraph 
 
     def _nli_label(self, prediction):
         best_label, best_prob = 'entailment', 0.0
@@ -98,12 +106,102 @@ class EntityMatcher:
         if self.nli is not None:
             self.nli = self.nli.cuda()
         return self
+    
+    def run_inference(self, cuda=-1):
+        ''' Runs the inference on the processed input files. Saves the result in a temporary output file
+    
+        Args:
+        model_path: Path to the model checkpoint
+        cuda: GPU id
+        '''
+        # uid = "eval"
+        # out_path =  "./" + uid + "_temp_dygie_output.json"
+        # data_path = "./" + uid + "temp_hypos_dygie_input.json"
+        out_path =  "/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_output.json"
+        data_path = "/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_input.json"
+        model_path = "/n/data1/hms/dbmi/rajpurkar/lab/datasets/cxr/RadGraph/models/model_checkpoint/model.tar.gz"
+
+        print(f"allennlp predict {model_path} {data_path} \
+                --predictor dygie --include-package dygie \
+                --use-dataset-reader \
+                --output-file {out_path} \
+                --cuda-device {cuda} \
+                --silent")
+        
+        os.system(f"allennlp predict {model_path} {data_path} \
+                --predictor dygie --include-package dygie \
+                --use-dataset-reader \
+                --output-file {out_path} \
+                --cuda-device {cuda} \
+                --silent")
+    
+    def preprocess(self, rids, hypos):
+        final_list = []
+        for i in range(len(rids)):
+            hypo = hypos[i]
+            rid = rids[i].split(self.ID_SEPARATOR)[0]
+
+            temp_dict = {}
+            sent = re.sub('(?<! )(?=[/,-,:,.,!?()])|(?<=[/,-,:,.,!?()])(?! )', r' ',hypo).split()
+            temp_dict["doc_key"] = rid
+            temp_dict["sentences"] = [sent]
+            final_list.append(temp_dict)
+
+        with open("/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_input.json",'w') as outfile:
+            for item in final_list:
+                json.dump(item, outfile)
+                outfile.write("\n")
+    
+    def score_radgraph(self, rids, hypos):
+        self.preprocess(rids, hypos)
+        self.run_inference()
+        hypos_dict = postprocess_reports("/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_output.json")
+
+        p_list = []
+        r_list = []
+        for rid in rids:
+            rid = rid.split(self.ID_SEPARATOR)[0]
+            if rid in self.radgraph_gt:
+                hp_ent = hypos_dict[rid]['entities']
+                gt_ent = self.radgraph_gt[rid]['entities']
+                gt_set = {}
+                for key in gt_ent:
+                    token = gt_ent[key]['tokens']
+                    gt_set[token] = gt_ent[key]
+               
+                match = 0
+                p_denom = len(hp_ent)
+                r_denom = len(gt_ent)
+                for key in hp_ent:
+                    token = hp_ent[key]['tokens']
+                    if token in gt_set:
+                        match += 1
+                precision, recall = 0., 0.
+                if p_denom > 0:
+                    precision = float(match)/p_denom 
+                if r_denom > 0:
+                    recall = float(match)/r_denom 
+                p_list.append(precision)
+                r_list.append(recall)
+            else:
+                print("ERROR: rid missing from ground truth")
+        avg_prec = np.mean(p_list)
+        avg_rec = np.mean(r_list)
+        return avg_prec, avg_rec 
+
+        # gt_dict = ??
+        # load the dict from ground truth
+        # --entity-match mimic-cxr_ner.txt.gz
+        # compute entity F1 score
+        # compute precision (# entitiy matches / # hypothesis entities)
+        # compute recall (# entity matches / # truth entities)
 
     def score(self, rids, hypos):
         # Named entity recognition
         hypo_sents = {}
         hypos_entities = {}
         texts, buf = [], []
+        # buf is used to join a batch into one string text
         for hypo in hypos:
             buf.append(hypo)
             if len(buf) >= self.batch:
@@ -113,10 +211,10 @@ class EntityMatcher:
         if len(buf) > 0:
             text = '\n\n{0}\n\n'.format(self.DOC_SEPARATOR).join(buf)
             texts.append(text)
-        i = 0
+        i = 0 # report / datapoint counter
         for text in texts:
             doc = self.ner(text)
-            j = 0
+            j = 0 # sentence counter within the i-th report
             for sentence in doc.sentences:
                 if i not in hypos_entities:
                     hypos_entities[i] = {}
@@ -128,13 +226,13 @@ class EntityMatcher:
                 else:
                     if len(hypo_sents[i]) > 0:
                         hypo_sents[i] += '\n'
-                    hypo_sents[i] += sentence.text
+                    hypo_sents[i] += sentence.text # add the sentence text
                     for entity in sentence.ents:
                         if entity.type in self.target_types:
                             buf = []
                             for word in entity.words:
                                 buf.append(word.text.lower())
-                            s = ' '.join(buf)
+                            s = ' '.join(buf) # entity string
                             if s not in hypos_entities:
                                 hypos_entities[i][s] = [j]
                             else:
@@ -163,7 +261,7 @@ class EntityMatcher:
                 for sid, tup in rs['scores'][1].items():
                     pred, _ = self._nli_label(tup[0])
                     hypo_nli[i][sid] = pred
-        # Calculate scores
+        # Calculate scores (precision, recall, F score)
         scores_e, scores_n = [], []
         for i, rid in enumerate(rids):
             hypo_entities = hypos_entities[i]
@@ -171,10 +269,10 @@ class EntityMatcher:
             ref_entities = self.entities[rid]
             # precision
             match_e, match_n, total_pr = 0, 0, 0
-            if self.prf != 'r':
+            if self.prf != 'r': # compute precision 
                 for s in hypo_entities.keys():
                     for sid in hypo_entities[s]:
-                        if s in ref_entities:
+                        if s in ref_entities: # match_e is the intersecting entities
                             match_e += 1
                             if hypo_nli is None:
                                 match_n += 1.0
@@ -562,6 +660,8 @@ class GenEval:
             scores.append(msn)
             scores_detailed.append(sde)
             scores_detailed.append(sdn)
+        print("result of eval")
+        print(scores, scores_detailed)
         return scores, scores_detailed
 
     def eval_batch(self, ids, refs, hypos, tfidf_vectorizer=None, ref_ids=None, batch_size=10000, progress_name=None):
