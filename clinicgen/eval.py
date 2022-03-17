@@ -152,10 +152,34 @@ class EntityMatcher:
                 json.dump(item, outfile)
                 outfile.write("\n")
     
+    # TODO: this should prob go into utils later... 
+    def f1(self, p_list, r_list):
+        assert len(p_list) == len(r_list)
+        if len(p_list) == 0:
+            return np.array([])
+        
+        p_list = np.array(p_list)
+        r_list = np.array(r_list)
+        def func(slice):
+            # func takes in a 1D numpy array
+            p,r = slice[0], slice[1]
+            if p > 0. and r > 0.:
+                return 2 * p * r / (p + r)
+            else:
+                return 0.
+        arr = np.stack([p_list, r_list])
+        print(arr)
+        f_list = np.apply_along_axis(func, 0, arr)
+        return f_list 
+   
     def score_radgraph(self, rids, hypos):
+        '''
+        Currently this function returns the radgraph basic entity F1 (without regard for entity label)
+        '''
         self.preprocess(rids, hypos)
         self.run_inference()
         hypos_dict = postprocess_reports("/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_output.json")
+        # TODO: clean up files?
 
         p_list = []
         r_list = []
@@ -164,9 +188,10 @@ class EntityMatcher:
             if rid in self.radgraph_gt:
                 hp_ent = hypos_dict[rid]['entities']
                 gt_ent = self.radgraph_gt[rid]['entities']
+
                 gt_set = {}
                 for key in gt_ent:
-                    token = gt_ent[key]['tokens']
+                    token = gt_ent[key]['tokens'].lower()
                     gt_set[token] = gt_ent[key]
                
                 match = 0
@@ -181,13 +206,19 @@ class EntityMatcher:
                     precision = float(match)/p_denom 
                 if r_denom > 0:
                     recall = float(match)/r_denom 
+
                 p_list.append(precision)
                 r_list.append(recall)
             else:
                 print("ERROR: rid missing from ground truth")
-        avg_prec = np.mean(p_list)
-        avg_rec = np.mean(r_list)
-        return avg_prec, avg_rec 
+        if self.prf == 'p':
+            score, score_details = np.mean(p_list), p_list
+        elif self.prf == 'r':
+            score, score_details = np.mean(r_list), r_list
+        else:
+            f_list = self.f1(p_list, r_list)
+            score, score_details = np.mean(f_list), f_list 
+        return score, score_details
 
         # gt_dict = ??
         # load the dict from ground truth
@@ -196,7 +227,7 @@ class EntityMatcher:
         # compute precision (# entitiy matches / # hypothesis entities)
         # compute recall (# entity matches / # truth entities)
 
-    def score(self, rids, hypos):
+    def score_orig(self, rids, hypos):
         # Named entity recognition
         hypo_sents = {}
         hypos_entities = {}
@@ -337,6 +368,10 @@ class EntityMatcher:
         mean_exact_n = np.mean(scores_n)
         return mean_exact_e, scores_e, mean_exact_n, scores_n
 
+    def score(self, rids, hypos):
+        mean_e, scores_e = self.score_radgraph(rids, hypos)
+        old_mean_e, old_scores_e, mean_n, scores_n = self.score_orig(rids, hypos)
+        return mean_e, scores_e, mean_n, scores_n
 
 class GenEval:
     EVAL_ID = 'id'

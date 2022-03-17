@@ -1,5 +1,8 @@
+import sys
+sys.settrace 
 import unittest
 import json
+import numpy as np
 
 from clinicgen.eval import EntityMatcher
 
@@ -114,12 +117,40 @@ class TestEntityMatcher(unittest.TestCase):
         print("score end", time.perf_counter() - start_time)
     
     def test_radgraph_score(self):
+        # the ground truth results are in dygiepp_temp_files
         print("radgraph score start")
         start_time = time.perf_counter()
-        rs = self.matcher.score_radgraph(['1', '2'], ['No pleural effusion.', 'Normal heart size.'])
+        rids = ['56543992', '52026760']
+        hypos = ['No pleural effusion.', 'Enlarged heart size.']
+        result = self.matcher.score_radgraph(rids, hypos)
+        score, score_details = result 
         print("radgraph score end", time.perf_counter() - start_time)
+        
+        # hypo 0: should be r=2/10, p=2/2 -> 0.333 F1
+        # hypo 1: should be r=2/15, p=2/3 -> 0.222 F1
+        self.assertAlmostEqual(score_details[0], 0.3333, places=3)
+        self.assertAlmostEqual(score_details[1], 0.2222, places=3)
+        
+
+def f1(p_list, r_list):
+    p_list = np.array(p_list)
+    r_list = np.array(r_list)
+    def func(slice):
+        # func takes in a 1D numpy array
+        p,r = slice[0], slice[1]
+        if p > 0. and r > 0.:
+            return 2 * p * r / (p + r)
+        else:
+            return 0.
+    arr = np.stack([p_list, r_list])
+    f_list = np.apply_along_axis(func, 0, arr)
+    return f_list 
 
 if __name__ == '__main__':
+    # p_list = [0.3, 0.5, 0.0, 0.8, 0.7]
+    # r_list = [0.1, 0.8, 0.4, 0.5, 0.8]
+    # fscore = f1(p_list, r_list)
+    # print("FSCORE! ", fscore)
     unittest.main()
     # print("GETTING STARTED")
     # r_score, s_score = score_comparison()
