@@ -102,8 +102,8 @@ class TestEntityMatcher(unittest.TestCase):
     def setUp(self):
         print("set up start")
         start_time = time.perf_counter()
-        sentences = {'1': {0: 'No pleural effusions.'}, '2': {0: 'Enlarged heart.'}}
-        entities = {'1': {'pleural': [0], 'effusions': [0]}, '2': {'heart': [0]}}
+        sentences = {'56543992': {0: 'No pleural effusions.'}, '52026760': {0: 'Enlarged heart.'}}
+        entities = {'56543992': {'pleural': [0], 'effusions': [0]}, '52026760': {'heart': [0]}}
         target_types = {'ANATOMY': True, 'OBSERVATION': True}
         self.matcher = EntityMatcher(sentences, entities, target_types)
         print("set up end", time.perf_counter() - start_time)
@@ -130,7 +130,13 @@ class TestEntityMatcher(unittest.TestCase):
         # hypo 1: should be r=2/15, p=2/3 -> 0.222 F1
         self.assertAlmostEqual(score_details[0], 0.3333, places=3)
         self.assertAlmostEqual(score_details[1], 0.2222, places=3)
-        
+    
+    def test_new_score(self):
+        rids = ['56543992', '52026760']
+        hypos = ['No pleural effusion.', 'Enlarged heart size.']
+        result = self.matcher.score(rids, hypos)
+        mean_e, scores_e, mean_n, scores_n = result 
+        print(result)
 
 def f1(p_list, r_list):
     p_list = np.array(p_list)
