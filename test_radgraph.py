@@ -108,13 +108,13 @@ class TestEntityMatcher(unittest.TestCase):
         self.matcher = EntityMatcher(sentences, entities, target_types)
         print("set up end", time.perf_counter() - start_time)
 
-    def test_score(self):
-        print("score start")
-        start_time = time.perf_counter()
-        rs = self.matcher.score(['1', '2'], ['No pleural effusion.', 'Normal heart size.'])
-        self.assertEqual(rs[1][0], 0.5)
-        self.assertEqual(rs[1][1], 1.0)
-        print("score end", time.perf_counter() - start_time)
+    # def test_score(self):
+    #     print("score start")
+    #     start_time = time.perf_counter()
+    #     rs = self.matcher.score(['1', '2'], ['No pleural effusion.', 'Normal heart size.'])
+    #     self.assertEqual(rs[1][0], 0.5)
+    #     self.assertEqual(rs[1][1], 1.0)
+    #     print("score end", time.perf_counter() - start_time)
     
     def test_radgraph_score(self):
         # the ground truth results are in dygiepp_temp_files
