@@ -122,7 +122,7 @@ class TestEntityMatcher(unittest.TestCase):
         start_time = time.perf_counter()
         rids = ['56543992', '52026760']
         hypos = ['No pleural effusion.', 'Enlarged heart size.']
-        result = self.matcher.score_radgraph(rids, hypos)
+        result = self.matcher.radgraph_entity_match(rids, hypos)
         score, score_details = result 
         print("radgraph score end", time.perf_counter() - start_time)
         
@@ -134,7 +134,7 @@ class TestEntityMatcher(unittest.TestCase):
     def test_new_score(self):
         rids = ['56543992', '52026760']
         hypos = ['No pleural effusion.', 'Enlarged heart size.']
-        result = self.matcher.score(rids, hypos)
+        result = self.matcher.radgraph_score(rids, hypos)
         mean_e, scores_e, mean_n, scores_n = result 
         print(result)
 

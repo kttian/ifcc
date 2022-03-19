@@ -8,7 +8,7 @@ import re
 import time
 import numpy as np
 import torch
-from collections import OrderedDict
+from collections import defaultdict, OrderedDict
 from sklearn.feature_extraction.text import TfidfVectorizer
 from stanza import Pipeline
 from tqdm import tqdm
@@ -172,23 +172,28 @@ class EntityMatcher:
         f_list = np.apply_along_axis(func, 0, arr)
         return f_list 
    
-    def score_radgraph(self, rids, hypos):
+    def radgraph_entity_match(self, rids, hypos):
         '''
-        Currently this function returns the radgraph basic entity F1 (without regard for entity label)
+        Currently this function returns the Radgraph basic entity match score (ignoring entity label)
+        It can compute
+            - entity match precision (# entity matches / # hypothesis entities)
+            - entity match recall (# entity matches / # true entities)
+            - entity match F1 score 
         '''
         self.preprocess(rids, hypos)
         self.run_inference()
         hypos_dict = postprocess_reports("/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_output.json")
         # TODO: clean up files?
 
-        p_list = []
-        r_list = []
+        p_list = [] # list of entity match precision scores per report
+        r_list = [] # list of entity match recall scores per report
         for rid in rids:
             rid = rid.split(self.ID_SEPARATOR)[0]
+            # we expect the rid to be in the ground truth dictionary 
             if rid in self.radgraph_gt:
-                hp_ent = hypos_dict[rid]['entities']
-                gt_ent = self.radgraph_gt[rid]['entities']
-
+                hp_ent = hypos_dict[rid]['entities'] # hypothesis entities
+                gt_ent = self.radgraph_gt[rid]['entities'] # ground truth entities 
+                # key gt entities by token for easier lookup
                 gt_set = {}
                 for key in gt_ent:
                     token = gt_ent[key]['tokens'].lower()
@@ -226,6 +231,113 @@ class EntityMatcher:
         # compute entity F1 score
         # compute precision (# entitiy matches / # hypothesis entities)
         # compute recall (# entity matches / # truth entities)
+
+    def radgraph_score(self, rids, hypos):
+        '''
+        Returns full Radgraph match score (on entities and relations)
+        It can compute
+            - entity match precision (# entity matches / # hypothesis entities)
+            - entity match recall (# entity matches / # true entities)
+            - entity match F1 score 
+        '''
+        self.preprocess(rids, hypos)
+        self.run_inference()
+        hypos_dict = postprocess_reports("/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_output.json")
+        # TODO: clean up files?
+
+        e_list = [] # list of entity match F1 scores per report
+        n_list = [] # list of relation match F1 scores per report
+        for rid in rids:
+            rid = rid.split(self.ID_SEPARATOR)[0]
+            # we expect the rid to be in the ground truth dictionary 
+            if rid in self.radgraph_gt:
+                hp_ent = hypos_dict[rid]['entities'] # hypothesis entities
+                gt_ent = self.radgraph_gt[rid]['entities'] # ground truth entities 
+
+                entity_labels = ['ANAT-DP', 'OBS-DP', 'OBS-U', 'OBS-DA']
+                relation_labels = ['modify', 'located_at', 'suggestive_of']
+                tp_count = defaultdict(lambda: 0) # counts TP for each label
+                pd_count = defaultdict(lambda: 0) # counts precision denominator 
+                rd_count = defaultdict(lambda: 0) # counts recall denominator 
+
+                # key gt entities by token for easier lookup
+                gt_set = {}
+                for key in gt_ent:
+                    token = gt_ent[key]['tokens'].lower()
+                    gt_set[token] = gt_ent[key]
+                    # count recall denominator for entities 
+                    gt_label = gt_set[token]['label']
+                    rd_count[gt_label] += 1
+
+                    # count recall denominator for entities 
+                    gt_token_relations = gt_set[token]['relations']
+                    for gt_item in gt_token_relations:
+                        gt_relation_type, gt_relation_entity = gt_item[0], gt_item[1]
+                        rd_count[gt_relation_type] += 1
+                
+                # loop through hypothesis entities
+                for key in hp_ent:
+                    token = hp_ent[key]['tokens']
+                    relations = hp_ent[key]['relations']
+                    # count precision denominator for entities 
+                    hp_label = hp_ent[key]['label']
+                    pd_count[hp_label] += 1
+
+                    # get hypothesis relations for this entity
+                    hp_token_relations = hp_ent[key]['relations'] # e.g. "relations": [["modify", "1"]]
+
+                    if token in gt_set:
+                        # count true positives for entities
+                        gt_label = gt_set[token]['label']
+                        if hp_label == gt_label:
+                            tp_count[hp_label] += 1
+                        
+                        # get true relations for this entity
+                        gt_token_relations = gt_set[token]['relations']
+                        # compute pd and tp counts for relations 
+                        for hp_item in hp_token_relations:
+                            relation_type, relation_entity = hp_item[0], hp_item[1] # strings
+                            pd_count[relation_type] += 1
+                            if hp_item in gt_token_relations:
+                                tp_count[relation_type] += 1
+                        
+                        # for hp_item in hp_relations:
+                        #     relation_type, relation_entity = hp_item[0], hp_item[1] # strings
+                        #     pd_count[relation_type] += 1
+                        #     for gt_item in gt_relations:
+                        #         if hp_item == gt_item:
+                        #             tp_count[relation_type] += 1
+                
+                def compute_score(labels, tp_count, pd_count, rd_count):
+                    # computes the score for a single report, across all given labels
+                    macro_avg = 0.
+                    for lab in labels:
+                        prec, rec, f_score = 0., 0., 0.
+                        if pd_count[lab] > 0.:
+                            prec = float(tp_count[lab])/pd_count[lab]
+                        if rd_count[lab] > 0.:
+                            rec = float(tp_count[lab])/rd_count[lab]
+                        if prec > 0. and rec > 0.:
+                            f_score = 2 * prec * rec / (prec + rec)
+                        macro_avg += f_score 
+                    macro_avg /= len(labels)
+                    return macro_avg 
+                
+                e_score_macro = compute_score(entity_labels, tp_count, pd_count, rd_count)
+                n_score_macro = compute_score(relation_labels, tp_count, pd_count, rd_count)
+
+                e_list.append(e_score_macro)
+                n_list.append(n_score_macro)
+            else:
+                print("ERROR: rid missing from ground truth")
+        # if self.prf == 'p':
+        #     score, score_details = np.mean(p_list), p_list
+        # elif self.prf == 'r':
+        #     score, score_details = np.mean(r_list), r_list
+        # else:
+        #     f_list = self.f1(p_list, r_list)
+        #     score, score_details = np.mean(f_list), f_list 
+        return np.mean(e_list), e_list, np.mean(n_list), n_list 
 
     def score_orig(self, rids, hypos):
         # Named entity recognition
@@ -369,9 +481,10 @@ class EntityMatcher:
         return mean_exact_e, scores_e, mean_exact_n, scores_n
 
     def score(self, rids, hypos):
-        mean_e, scores_e = self.score_radgraph(rids, hypos)
-        old_mean_e, old_scores_e, mean_n, scores_n = self.score_orig(rids, hypos)
-        return mean_e, scores_e, mean_n, scores_n
+        # mean_e, scores_e = self.radgraph_entity_match(rids, hypos)
+        # old_mean_e, old_scores_e, mean_n, scores_n = self.score_orig(rids, hypos)
+        # return mean_e, scores_e, mean_n, scores_n
+        return self.radgraph_score(rids, hypos)
 
 class GenEval:
     EVAL_ID = 'id'
