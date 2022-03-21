@@ -256,8 +256,9 @@ class EntityMatcher:
         n_list = [] # list of relation match F1 scores per report
         for rid in rids:
             rid = rid.split(self.ID_SEPARATOR)[0]
-            # we expect the rid to be in the ground truth dictionary 
-            if rid in self.radgraph_gt:
+            # the rid should be in the ground truth dictionary 
+            # in certain cases (empty documents) the rid won't be in hypos_dict
+            if rid in self.radgraph_gt and rid in hypos_dict:
                 hp_ent = hypos_dict[rid]['entities'] # hypothesis entities
                 gt_ent = self.radgraph_gt[rid]['entities'] # ground truth entities 
 
@@ -340,7 +341,7 @@ class EntityMatcher:
                 e_list.append(e_score_macro)
                 n_list.append(n_score_macro)
             else:
-                print("ERROR: rid missing from ground truth")
+                print("ERROR: rid missing from ground truth / hypos dict")
         # if self.prf == 'p':
         #     score, score_details = np.mean(p_list), p_list
         # elif self.prf == 'r':
