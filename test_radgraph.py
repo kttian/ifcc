@@ -1,12 +1,11 @@
-import sys
-sys.settrace 
-import unittest
+from clinicgen.eval import EntityMatcher
 import json
 import numpy as np
-
-from clinicgen.eval import EntityMatcher
-
+import sys
 import time 
+import unittest
+
+sys.settrace 
 
 def load_entities2(cls, path):
     start_time = time.perf_counter()

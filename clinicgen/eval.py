@@ -20,6 +20,8 @@ from clinicgen.external.cider.cider import Cider, CiderScorer
 from clinicgen.external.rouge.rouge import Rouge
 from clinicgen.external.spice.spice import Spice
 from clinicgen.radgraph_inference import postprocess_reports
+import logging
+from pathlib import Path
 
 class EntityMatcher:
     DOC_SEPARATOR = 'DOCSEP'
@@ -88,7 +90,7 @@ class EntityMatcher:
                         **config)
     
     @classmethod
-    def load_radgraph(cls, path='/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/radgraph_inference_out_report_key.json.gz'):
+    def load_radgraph(cls, path='radgraph_inference_out_report_key.json.gz'):
         # load radgraph inference outputs (ground truth entities/relations)
         with gzip.open(path, 'r') as f:
             radgraph = json.load(f)
@@ -117,9 +119,10 @@ class EntityMatcher:
         # uid = "eval"
         # out_path =  "./" + uid + "_temp_dygie_output.json"
         # data_path = "./" + uid + "temp_hypos_dygie_input.json"
-        out_path =  "/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_output.json"
-        data_path = "/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_input.json"
+        out_path =  "temp_hypos_dygie_output.json"
+        data_path = "temp_hypos_dygie_input.json"
         model_path = "/n/data1/hms/dbmi/rajpurkar/lab/datasets/cxr/RadGraph/models/model_checkpoint/model.tar.gz"
+        print("inference in/out path", Path(__file__))
 
         print(f"allennlp predict {model_path} {data_path} \
                 --predictor dygie --include-package dygie \
@@ -133,7 +136,7 @@ class EntityMatcher:
                 --use-dataset-reader \
                 --output-file {out_path} \
                 --cuda-device {cuda} \
-                --silent")
+                --silent > log.txt")
     
     def preprocess(self, rids, hypos):
         final_list = []
@@ -146,8 +149,9 @@ class EntityMatcher:
             temp_dict["doc_key"] = rid
             temp_dict["sentences"] = [sent]
             final_list.append(temp_dict)
+        print("preprocess path", Path(__file__))
 
-        with open("/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_input.json",'w') as outfile:
+        with open("temp_hypos_dygie_input.json",'w') as outfile:
             for item in final_list:
                 json.dump(item, outfile)
                 outfile.write("\n")
@@ -182,7 +186,7 @@ class EntityMatcher:
         '''
         self.preprocess(rids, hypos)
         self.run_inference()
-        hypos_dict = postprocess_reports("/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_output.json")
+        hypos_dict = postprocess_reports("temp_hypos_dygie_output.json")
         # TODO: clean up files?
 
         p_list = [] # list of entity match precision scores per report
@@ -242,8 +246,11 @@ class EntityMatcher:
         '''
         self.preprocess(rids, hypos)
         self.run_inference()
-        hypos_dict = postprocess_reports("/n/data1/hms/dbmi/rajpurkar/lab/home/kt220/m2trans-kttian/temp_hypos_dygie_output.json")
+        hypos_dict = postprocess_reports("temp_hypos_dygie_output.json")
+        print("postprocess read in path:", Path(__file__))
         # TODO: clean up files?
+        # print(">>>hypos_dict")
+        # print(hypos_dict)
 
         e_list = [] # list of entity match F1 scores per report
         n_list = [] # list of relation match F1 scores per report
@@ -296,10 +303,14 @@ class EntityMatcher:
                         gt_token_relations = gt_set[token]['relations']
                         # compute pd and tp counts for relations 
                         for hp_item in hp_token_relations:
-                            relation_type, relation_entity = hp_item[0], hp_item[1] # strings
+                            relation_type, relation_key = hp_item[0], hp_item[1] # strings
+                            relation_token = hp_ent[relation_key]['tokens']
                             pd_count[relation_type] += 1
-                            if hp_item in gt_token_relations:
-                                tp_count[relation_type] += 1
+                            for gt_item in gt_token_relations:
+                                gt_rel_type, gt_rel_key = gt_item[0], gt_item[1]
+                                gt_rel_token = gt_ent[gt_rel_key]['tokens']
+                                if gt_rel_type == relation_type and gt_rel_token == relation_token:
+                                    tp_count[relation_type] += 1
                         
                         # for hp_item in hp_relations:
                         #     relation_type, relation_entity = hp_item[0], hp_item[1] # strings
