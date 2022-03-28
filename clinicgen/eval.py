@@ -109,7 +109,7 @@ class EntityMatcher:
             self.nli = self.nli.cuda()
         return self
     
-    def run_inference(self, cuda=-1):
+    def run_inference(self, cuda=0):
         ''' Runs the inference on the processed input files. Saves the result in a temporary output file
     
         Args:
