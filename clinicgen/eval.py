@@ -122,7 +122,7 @@ class EntityMatcher:
         out_path =  "temp_hypos_dygie_output.json"
         data_path = "temp_hypos_dygie_input.json"
         model_path = "/n/data1/hms/dbmi/rajpurkar/lab/datasets/cxr/RadGraph/models/model_checkpoint/model.tar.gz"
-        print("inference in/out path", Path(__file__))
+        # print("inference in/out path", Path(__file__))
 
         print(f"allennlp predict {model_path} {data_path} \
                 --predictor dygie --include-package dygie \
@@ -258,90 +258,96 @@ class EntityMatcher:
             rid = rid.split(self.ID_SEPARATOR)[0]
             # the rid should be in the ground truth dictionary 
             # in certain cases (empty documents) the rid won't be in hypos_dict
-            if rid in self.radgraph_gt and rid in hypos_dict:
-                hp_ent = hypos_dict[rid]['entities'] # hypothesis entities
-                gt_ent = self.radgraph_gt[rid]['entities'] # ground truth entities 
+            # turns out there are many other cases of errors, so we use a generic try catch
+            try:
+                # if rid in self.radgraph_gt and rid in hypos_dict:
+                if rid in self.radgraph_gt:
+                    hp_ent = hypos_dict[rid]['entities'] # hypothesis entities
+                    gt_ent = self.radgraph_gt[rid]['entities'] # ground truth entities 
+                    
+                    entity_labels = ['ANAT-DP', 'OBS-DP', 'OBS-U', 'OBS-DA']
+                    relation_labels = ['modify', 'located_at', 'suggestive_of']
+                    tp_count = defaultdict(lambda: 0) # counts TP for each label
+                    pd_count = defaultdict(lambda: 0) # counts precision denominator 
+                    rd_count = defaultdict(lambda: 0) # counts recall denominator 
 
-                entity_labels = ['ANAT-DP', 'OBS-DP', 'OBS-U', 'OBS-DA']
-                relation_labels = ['modify', 'located_at', 'suggestive_of']
-                tp_count = defaultdict(lambda: 0) # counts TP for each label
-                pd_count = defaultdict(lambda: 0) # counts precision denominator 
-                rd_count = defaultdict(lambda: 0) # counts recall denominator 
-
-                # key gt entities by token for easier lookup
-                gt_set = {}
-                for key in gt_ent:
-                    token = gt_ent[key]['tokens'].lower()
-                    gt_set[token] = gt_ent[key]
-                    # count recall denominator for entities 
-                    gt_label = gt_set[token]['label']
-                    rd_count[gt_label] += 1
-
-                    # count recall denominator for entities 
-                    gt_token_relations = gt_set[token]['relations']
-                    for gt_item in gt_token_relations:
-                        gt_relation_type, gt_relation_entity = gt_item[0], gt_item[1]
-                        rd_count[gt_relation_type] += 1
-                
-                # loop through hypothesis entities
-                for key in hp_ent:
-                    token = hp_ent[key]['tokens']
-                    relations = hp_ent[key]['relations']
-                    # count precision denominator for entities 
-                    hp_label = hp_ent[key]['label']
-                    pd_count[hp_label] += 1
-
-                    # get hypothesis relations for this entity
-                    hp_token_relations = hp_ent[key]['relations'] # e.g. "relations": [["modify", "1"]]
-
-                    if token in gt_set:
-                        # count true positives for entities
+                    # key gt entities by token for easier lookup
+                    gt_set = {}
+                    for key in gt_ent:
+                        token = gt_ent[key]['tokens'].lower()
+                        gt_set[token] = gt_ent[key]
+                        # count recall denominator for entities 
                         gt_label = gt_set[token]['label']
-                        if hp_label == gt_label:
-                            tp_count[hp_label] += 1
-                        
-                        # get true relations for this entity
-                        gt_token_relations = gt_set[token]['relations']
-                        # compute pd and tp counts for relations 
-                        for hp_item in hp_token_relations:
-                            relation_type, relation_key = hp_item[0], hp_item[1] # strings
-                            relation_token = hp_ent[relation_key]['tokens']
-                            pd_count[relation_type] += 1
-                            for gt_item in gt_token_relations:
-                                gt_rel_type, gt_rel_key = gt_item[0], gt_item[1]
-                                gt_rel_token = gt_ent[gt_rel_key]['tokens']
-                                if gt_rel_type == relation_type and gt_rel_token == relation_token:
-                                    tp_count[relation_type] += 1
-                        
-                        # for hp_item in hp_relations:
-                        #     relation_type, relation_entity = hp_item[0], hp_item[1] # strings
-                        #     pd_count[relation_type] += 1
-                        #     for gt_item in gt_relations:
-                        #         if hp_item == gt_item:
-                        #             tp_count[relation_type] += 1
-                
-                def compute_score(labels, tp_count, pd_count, rd_count):
-                    # computes the score for a single report, across all given labels
-                    macro_avg = 0.
-                    for lab in labels:
-                        prec, rec, f_score = 0., 0., 0.
-                        if pd_count[lab] > 0.:
-                            prec = float(tp_count[lab])/pd_count[lab]
-                        if rd_count[lab] > 0.:
-                            rec = float(tp_count[lab])/rd_count[lab]
-                        if prec > 0. and rec > 0.:
-                            f_score = 2 * prec * rec / (prec + rec)
-                        macro_avg += f_score 
-                    macro_avg /= len(labels)
-                    return macro_avg 
-                
-                e_score_macro = compute_score(entity_labels, tp_count, pd_count, rd_count)
-                n_score_macro = compute_score(relation_labels, tp_count, pd_count, rd_count)
+                        rd_count[gt_label] += 1
 
-                e_list.append(e_score_macro)
-                n_list.append(n_score_macro)
-            else:
-                print("ERROR: rid missing from ground truth / hypos dict")
+                        # count recall denominator for entities 
+                        gt_token_relations = gt_set[token]['relations']
+                        for gt_item in gt_token_relations:
+                            gt_relation_type, gt_relation_entity = gt_item[0], gt_item[1]
+                            rd_count[gt_relation_type] += 1
+                    
+                    # loop through hypothesis entities
+                    for key in hp_ent:
+                        token = hp_ent[key]['tokens']
+                        relations = hp_ent[key]['relations']
+                        # count precision denominator for entities 
+                        hp_label = hp_ent[key]['label']
+                        pd_count[hp_label] += 1
+                        
+                        # get hypothesis relations for this entity
+                        hp_token_relations = hp_ent[key]['relations'] # e.g. "relations": [["modify", "1"]]
+
+                        if token in gt_set:
+                            # count true positives for entities
+                            gt_label = gt_set[token]['label']
+                            if hp_label == gt_label:
+                                tp_count[hp_label] += 1
+                            
+                            # get true relations for this entity
+                            gt_token_relations = gt_set[token]['relations']
+                            # compute pd and tp counts for relations 
+                            for hp_item in hp_token_relations:
+                                relation_type, relation_key = hp_item[0], hp_item[1] # strings
+                                relation_token = hp_ent[relation_key]['tokens']
+                                pd_count[relation_type] += 1
+                                for gt_item in gt_token_relations:
+                                    gt_rel_type, gt_rel_key = gt_item[0], gt_item[1]
+                                    gt_rel_token = gt_ent[gt_rel_key]['tokens']
+                                    if gt_rel_type == relation_type and gt_rel_token == relation_token:
+                                        tp_count[relation_type] += 1
+                            
+                            # for hp_item in hp_relations:
+                            #     relation_type, relation_entity = hp_item[0], hp_item[1] # strings
+                            #     pd_count[relation_type] += 1
+                            #     for gt_item in gt_relations:
+                            #         if hp_item == gt_item:
+                            #             tp_count[relation_type] += 1
+                    
+                    def compute_score(labels, tp_count, pd_count, rd_count):
+                        # computes the score for a single report, across all given labels
+                        macro_avg = 0.
+                        for lab in labels:
+                            prec, rec, f_score = 0., 0., 0.
+                            if pd_count[lab] > 0.:
+                                prec = float(tp_count[lab])/pd_count[lab]
+                            if rd_count[lab] > 0.:
+                                rec = float(tp_count[lab])/rd_count[lab]
+                            if prec > 0. and rec > 0.:
+                                f_score = 2 * prec * rec / (prec + rec)
+                            macro_avg += f_score 
+                        macro_avg /= len(labels)
+                        return macro_avg 
+                    
+                    e_score_macro = compute_score(entity_labels, tp_count, pd_count, rd_count)
+                    n_score_macro = compute_score(relation_labels, tp_count, pd_count, rd_count)
+
+                    e_list.append(e_score_macro)
+                    n_list.append(n_score_macro)
+                else:
+                    print("ERROR: rid missing from ground truth")
+            except:
+                print("Training Error rid=", rid)
+
         # if self.prf == 'p':
         #     score, score_details = np.mean(p_list), p_list
         # elif self.prf == 'r':

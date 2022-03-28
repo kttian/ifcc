@@ -129,28 +129,31 @@ def main(args):
                     epoch_loss = logger.epoch_loss()
                     data_n, eval_interval, tqdm_interval = 0, 0, 0
                     for ids, inp, targ, vp in train_loader:
-                        # Train
-                        losses = model.train_step(inp, targ, optimizers, ids=ids, schedulers=batch_schedulers,
-                                                  meta=(vp,), clip_grad=args.clip_grad, device=device,
-                                                  non_blocking=train_loader.pin_memory, epoch=epoch + 1)
-                        epoch_loss = logger.epoch_loss_update(epoch_loss, losses)
-                        pbar_vals['losses'] = model.loss_progress(epoch_loss)
-                        # Validation / Test
-                        data_n += inp.shape[0]
-                        eval_interval += inp.shape[0]
-                        tqdm_interval += inp.shape[0]
-                        if args.run_eval and args.eval_interval is not None and eval_interval >= args.eval_interval:
-                            pbar_vals = EpochLog.log_datasets(logger, pbar_vals, epoch, data_n, epoch_loss, val_loader,
-                                                              test_loader, save=args.log_models)
-                            eval_interval -= args.eval_interval
-                        # Progress updates
-                        if args.tqdm_interval is None or tqdm_interval >= args.tqdm_interval:
-                            pbar.set_postfix(**pbar_vals)
-                            if args.tqdm_interval is not None:
-                                pbar.update(args.tqdm_interval)
-                            else:
-                                pbar.update(tqdm_interval)
-                            tqdm_interval = tqdm_interval - args.tqdm_interval if args.tqdm_interval is not None else 0
+                        try:
+                            # Train
+                            losses = model.train_step(inp, targ, optimizers, ids=ids, schedulers=batch_schedulers,
+                                                    meta=(vp,), clip_grad=args.clip_grad, device=device,
+                                                    non_blocking=train_loader.pin_memory, epoch=epoch + 1)
+                            epoch_loss = logger.epoch_loss_update(epoch_loss, losses)
+                            pbar_vals['losses'] = model.loss_progress(epoch_loss)
+                            # Validation / Test
+                            data_n += inp.shape[0]
+                            eval_interval += inp.shape[0]
+                            tqdm_interval += inp.shape[0]
+                            if args.run_eval and args.eval_interval is not None and eval_interval >= args.eval_interval:
+                                pbar_vals = EpochLog.log_datasets(logger, pbar_vals, epoch, data_n, epoch_loss, val_loader,
+                                                                test_loader, save=args.log_models)
+                                eval_interval -= args.eval_interval
+                            # Progress updates
+                            if args.tqdm_interval is None or tqdm_interval >= args.tqdm_interval:
+                                pbar.set_postfix(**pbar_vals)
+                                if args.tqdm_interval is not None:
+                                    pbar.update(args.tqdm_interval)
+                                else:
+                                    pbar.update(tqdm_interval)
+                                tqdm_interval = tqdm_interval - args.tqdm_interval if args.tqdm_interval is not None else 0
+                        except: 
+                            print("Train Errors: ", ids)
                 # Epoch end processes
                 for _, scheduler in schedulers.items():
                     scheduler.step()
