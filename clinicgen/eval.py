@@ -12,6 +12,15 @@ from collections import defaultdict, OrderedDict
 from sklearn.feature_extraction.text import TfidfVectorizer
 from stanza import Pipeline
 from tqdm import tqdm
+
+from allennlp.models.archival import load_archive
+from allennlp.predictors import Predictor
+from allennlp.common.util import import_module_and_submodules
+from allennlp.data.token_indexers.pretrained_transformer_mismatched_indexer import PretrainedTransformerMismatchedIndexer
+
+import dygie
+from dygie.data import DyGIEReader
+
 from clinicgen.data.image2text import ToTokenizedTexts
 from clinicgen.nli import BERTScorer, SimpleNLI
 from clinicgen.utils import data_cuda, RecoverWords
@@ -36,6 +45,7 @@ class EntityMatcher:
     PENALTY_SIGMA = 6.0
 
     def __init__(self, sentences, entities, target_types, mode='exact', batch=48, nli=None):
+        import_module_and_submodules("dygie")
         self.sentences = sentences
         self.entities = entities
         self.target_types = target_types
@@ -60,6 +70,16 @@ class EntityMatcher:
             self.penalty = True
         else:
             self.prf = 'f'
+
+        # TODO: make this a parameter instead of hardcoding 
+        model_path='/n/data1/hms/dbmi/rajpurkar/lab/datasets/cxr/RadGraph/models/model_checkpoint/model.tar.gz'
+        archive = load_archive(model_path, cuda_device=0)
+        self.predictor = Predictor.from_archive(archive, 'dygie')
+        ptm_indexer = PretrainedTransformerMismatchedIndexer(
+            model_name="microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext", 
+            max_length=512)
+        indexer = {"bert": ptm_indexer}
+        self.reader = DyGIEReader(max_span_width = 5, token_indexers = indexer)
 
     @classmethod
     def load_entities(cls, path, target_types):
@@ -109,7 +129,17 @@ class EntityMatcher:
             self.nli = self.nli.cuda()
         return self
     
-    def run_inference(self, cuda=0):
+    def run_inference(self, inputs):
+        # TODO: confirm that the cuda-device is 0
+        results = []
+        for doc_text in inputs:
+            # Loop over the documents.
+            instance = self.reader.text_to_instance(doc_text)
+            result = self.predictor.predict_instance(instance)
+            results.append(result)
+        return results
+
+    def run_inference_old(self, cuda=0):
         ''' Runs the inference on the processed input files. Saves the result in a temporary output file
     
         Args:
@@ -151,10 +181,11 @@ class EntityMatcher:
             final_list.append(temp_dict)
         print("preprocess path", Path(__file__))
 
-        with open("temp_hypos_dygie_input.json",'w') as outfile:
-            for item in final_list:
-                json.dump(item, outfile)
-                outfile.write("\n")
+        # with open("temp_hypos_dygie_input.json",'w') as outfile:
+        #     for item in final_list:
+        #         json.dump(item, outfile)
+        #         outfile.write("\n")
+        return final_list 
     
     # TODO: this should prob go into utils later... 
     def f1(self, p_list, r_list):
@@ -244,9 +275,9 @@ class EntityMatcher:
             - entity match recall (# entity matches / # true entities)
             - entity match F1 score 
         '''
-        self.preprocess(rids, hypos)
-        self.run_inference()
-        hypos_dict = postprocess_reports("temp_hypos_dygie_output.json")
+        inputs = self.preprocess(rids, hypos)
+        results = self.run_inference(inputs)
+        hypos_dict = postprocess_reports(results)
         print("postprocess read in path:", Path(__file__))
         # TODO: clean up files?
         # print(">>>hypos_dict")
@@ -826,8 +857,8 @@ class GenEval:
             scores.append(msn)
             scores_detailed.append(sde)
             scores_detailed.append(sdn)
-        print("result of eval")
-        print(scores, scores_detailed)
+        #print("result of eval")
+        #print(scores, scores_detailed)
         return scores, scores_detailed
 
     def eval_batch(self, ids, refs, hypos, tfidf_vectorizer=None, ref_ids=None, batch_size=10000, progress_name=None):

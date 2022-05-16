@@ -54,8 +54,25 @@ def preprocess_reports():
         for item in final_list:
             json.dump(item, outfile)
             outfile.write("\n")
+    return final_list
 
-def run_inference(model_path, cuda):
+def run_inference(model_path, inputs):
+    archive = load_archive(model_path)
+    predictor = Predictor.from_archive(archive, 'dygie')
+    ptm_indexer = PretrainedTransformerMismatchedIndexer(
+        model_name="microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract-fulltext", 
+        max_length=512)
+    indexer = {"bert": ptm_indexer}
+    reader = DyGIEReader(max_span_width = 5, token_indexers = indexer)
+    results = []
+    for doc_text in inputs:
+        # Loop over the documents.
+        instance = reader.text_to_instance(doc_text)
+        result = predictor.predict_instance(instance)
+        results.append(result)
+    return results
+
+def run_inference_old(model_path, cuda):
     
     """ Runs the inference on the processed input files. Saves the result in a
     temporary output file
@@ -83,7 +100,14 @@ def run_inference(model_path, cuda):
             --cuda-device {cuda} \
             --silent")
 
-def postprocess_reports(file_name="./temp_dygie_output.json"):
+def postprocess_reports(results):
+    final_dict = {}
+
+    for result in results:
+        postprocess_individual_report(result, final_dict)
+    return final_dict
+
+def postprocess_reports_old(file_name="./temp_dygie_output.json"):
     
     """Post processes all the reports and saves the result in train.json format
     """
