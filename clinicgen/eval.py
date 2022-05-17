@@ -129,16 +129,6 @@ class EntityMatcher:
             self.nli = self.nli.cuda()
         return self
     
-    def run_inference(self, inputs):
-        # TODO: confirm that the cuda-device is 0
-        results = []
-        for doc_text in inputs:
-            # Loop over the documents.
-            instance = self.reader.text_to_instance(doc_text)
-            result = self.predictor.predict_instance(instance)
-            results.append(result)
-        return results
-
     def run_inference_old(self, cuda=0):
         ''' Runs the inference on the processed input files. Saves the result in a temporary output file
     
@@ -168,7 +158,21 @@ class EntityMatcher:
                 --cuda-device {cuda} \
                 --silent > log.txt")
     
+    def run_inference(self, inputs):
+        # TODO: confirm that the cuda-device is 0
+        results = []
+        for doc_text in inputs:
+            # Loop over the documents.
+            instance = self.reader.text_to_instance(doc_text)
+            result = self.predictor.predict_instance(instance)
+            results.append(result)
+        return results
+
     def preprocess(self, rids, hypos):
+        '''
+        Given a list of report ids (rids) and hypothesis reports for those ids (hypos),
+        returns a list of dictionaries {"doc_key", "sentences"} as input to radgraph inference
+        '''
         final_list = []
         for i in range(len(rids)):
             hypo = hypos[i]
@@ -176,15 +180,12 @@ class EntityMatcher:
 
             temp_dict = {}
             sent = re.sub('(?<! )(?=[/,-,:,.,!?()])|(?<=[/,-,:,.,!?()])(?! )', r' ',hypo).split()
-            temp_dict["doc_key"] = rid
+            # temp_dict["doc_key"] = rid
+            # doc_key must be unique in batch (i is unique)
+            temp_dict["doc_key"] = "_".join([str(i),rid])
             temp_dict["sentences"] = [sent]
             final_list.append(temp_dict)
-        print("preprocess path", Path(__file__))
-
-        # with open("temp_hypos_dygie_input.json",'w') as outfile:
-        #     for item in final_list:
-        #         json.dump(item, outfile)
-        #         outfile.write("\n")
+        
         return final_list 
     
     # TODO: this should prob go into utils later... 
@@ -276,24 +277,32 @@ class EntityMatcher:
             - entity match F1 score 
         '''
         inputs = self.preprocess(rids, hypos)
+        # inputs is a list of {"doc_key": x, "sentences" : [sent]}
         results = self.run_inference(inputs)
+        # results is a list of radgraph outputs {'doc_key': x, ''predicted_ner'': ...}
         hypos_dict = postprocess_reports(results)
-        print("postprocess read in path:", Path(__file__))
+        # hypos dict is a dictionary of {'text' : , radgraphs}
+
+        # print("inputs:", inputs[0])
+        # print("results:", results[0])
+        # print("hypos dict:", hypos_dict[inputs[0]["doc_key"]])
+        # print("postprocess read in path:", Path(__file__))
         # TODO: clean up files?
         # print(">>>hypos_dict")
         # print(hypos_dict)
 
         e_list = [] # list of entity match F1 scores per report
         n_list = [] # list of relation match F1 scores per report
-        for rid in rids:
+        for i, rid in enumerate(rids):
             rid = rid.split(self.ID_SEPARATOR)[0]
+            doc_key = "_".join([str(i),rid])
             # the rid should be in the ground truth dictionary 
             # in certain cases (empty documents) the rid won't be in hypos_dict
             # turns out there are many other cases of errors, so we use a generic try catch
             try:
                 # if rid in self.radgraph_gt and rid in hypos_dict:
                 if rid in self.radgraph_gt:
-                    hp_ent = hypos_dict[rid]['entities'] # hypothesis entities
+                    hp_ent = hypos_dict[doc_key]['entities'] # hypothesis entities
                     gt_ent = self.radgraph_gt[rid]['entities'] # ground truth entities 
                     
                     entity_labels = ['ANAT-DP', 'OBS-DP', 'OBS-U', 'OBS-DA']
@@ -372,13 +381,25 @@ class EntityMatcher:
                     e_score_macro = compute_score(entity_labels, tp_count, pd_count, rd_count)
                     n_score_macro = compute_score(relation_labels, tp_count, pd_count, rd_count)
 
+                    # e_sc_str = "{:2f}".format(e_score_macro)
+                    # n_sc_str = "{:2f}".format(n_score_macro)
+                    # print(f"{i}, rid {rid}, score: {e_sc_str}, {n_sc_str}")
+                    # print(hypos[i])
                     e_list.append(e_score_macro)
                     n_list.append(n_score_macro)
                 else:
                     print("ERROR: rid missing from ground truth")
+                    # e_list.append(float("nan"))
+                    # n_list.append(float("nan"))
+                    # problem with nan is that it will send the mean of the whole list to nan
+                    e_list.append(0.)
+                    n_list.append(0.)
             except:
-                print("Training Error rid=", rid)
-
+                print("Training Error!! on rid", rid)
+                # e_list.append(float("nan"))
+                # n_list.append(float("nan"))
+                e_list.append(0.)
+                n_list.append(0.)        
         # if self.prf == 'p':
         #     score, score_details = np.mean(p_list), p_list
         # elif self.prf == 'r':
@@ -525,6 +546,10 @@ class EntityMatcher:
                 score_n *= penalty
             scores_e.append(score_e)
             scores_n.append(score_n)
+
+            e_sc_str = "{:2f}".format(score_e)
+            n_sc_str = "{:2f}".format(score_n)
+            print(f"{i}, rid {rid}, score: {e_sc_str}, {n_sc_str}")
         mean_exact_e = np.mean(scores_e)
         mean_exact_n = np.mean(scores_n)
         return mean_exact_e, scores_e, mean_exact_n, scores_n
@@ -533,6 +558,7 @@ class EntityMatcher:
         # mean_e, scores_e = self.radgraph_entity_match(rids, hypos)
         # old_mean_e, old_scores_e, mean_n, scores_n = self.score_orig(rids, hypos)
         # return mean_e, scores_e, mean_n, scores_n
+        # return self.score_orig(rids, hypos)
         return self.radgraph_score(rids, hypos)
 
 class GenEval:
