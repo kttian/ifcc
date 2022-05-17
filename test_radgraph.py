@@ -121,7 +121,8 @@ class TestEntityMatcher(unittest.TestCase):
         start_time = time.perf_counter()
         rids = ['56543992', '52026760']
         hypos = ['No pleural effusion.', 'Enlarged heart size.']
-        result = self.matcher.radgraph_entity_match(rids, hypos)
+        #result = self.matcher.radgraph_entity_match(rids, hypos)
+        result = self.matcher.radgraph_score(rids, hypos)
         score, score_details = result 
         print("radgraph score end", time.perf_counter() - start_time)
         
