@@ -95,6 +95,11 @@ class BERTNLI(torch.nn.Module):
             reps = self.dropout(reps)
             return self.linear(reps)
         else:
+            dev = self.bert.device
+            # print(dev)
+            token_ids = token_ids.to(dev)
+            attn_mask = attn_mask.to(dev)
+            seg_ids = seg_ids.to(dev)
             reps, cls = self.bert(token_ids, attention_mask=attn_mask, token_type_ids=seg_ids)
             if self.cls == 'token':
                 reps = reps[:, 0]
