@@ -159,9 +159,15 @@ def main(args):
                     scheduler.step()
                 if scheduler_tfr is not None:
                     scheduler_tfr.step()
-                pbar_vals = EpochLog.log_datasets(logger, pbar_vals, epoch, data_n, epoch_loss, val_loader, test_loader,
-                                                  save=args.log_models, progress=True)
-                logger.save_current_model(epoch)
+                
+                if epoch_loss is not None:
+                    # writes loss to train.txt
+                    logger.log_train(epoch, data_n, epoch_loss)
+                # generate reports / evaluation metrics for every 5 epochs (to save time)
+                if epoch % 5 == 1:
+                    pbar_vals = EpochLog.log_datasets(logger, pbar_vals, epoch, data_n, epoch_loss, val_loader, test_loader,
+                                                      save=args.log_models, progress=True)
+                logger.save_current_model(epoch, f'current_model_{epoch}')
         except BaseException:
             print('Unexpected exception: {0}'.format(traceback.format_exc()))
 

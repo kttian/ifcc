@@ -19,8 +19,9 @@ class EpochLog:
     @classmethod
     def log_datasets(cls, logger, pbar_vals, epoch, data_n, epoch_loss, val_loader, test_loader, progress=False,
                      save=True):
-        if epoch_loss is not None:
-            logger.log_train(epoch, data_n, epoch_loss)
+        # note: these two lines have been moved outside of log_datasets into train.py
+        # if epoch_loss is not None:
+        #     logger.log_train(epoch, data_n, epoch_loss)
         results = {}
         logger.evaluator.setup()
         if logger.device == 'gpu':
@@ -250,8 +251,8 @@ class FileLogger:
         else:
             return 0
 
-    def save_current_model(self, epoch):
-        current = os.path.join(self.state, 'model_current.dict.gz')
+    def save_current_model(self, epoch, name='model_current'):
+        current = os.path.join(self.state, f'{name}.dict.gz')
         self.save_model(current, epoch, self.model, self.optimizers, self.schedulers, self.batch_schedulers,
                         self.scheduler_tfr, self.bests, device=self.device)
 
